@@ -1,7 +1,6 @@
-" File:         IndexedSearch.vim
 " Author:       Yakov Lerner <iler.ml@gmail.com>
 " URL:          http://www.vim.org/scripts/script.php?script_id=1682
-" Last change:  2017-10-22
+" Last change:  2018-03-21
 
 " This script redefines 6 search commands (/,?,n,N,*,#). At each search, it
 " shows at which match number you are, and the total number of matches, like
@@ -67,6 +66,10 @@ if !exists('g:indexed_search_numbered_only')
     let g:indexed_search_numbered_only = 0
 endif
 
+if !exists('g:indexed_search_line_info')
+    let g:indexed_search_line_info = 0
+endif
+
 " Mappings
 if !exists('g:indexed_search_mappings')
     let g:indexed_search_mappings = 1
@@ -80,116 +83,76 @@ if !exists('g:indexed_search_center')
     let g:indexed_search_center = 0
 endif
 
-if !exists('g:indexed_search_line_info')
-  let g:indexed_search_line_info = 0
-endif
-
 if !exists('g:indexed_search_n_always_searches_forward')
-  let g:indexed_search_n_always_searches_forward = 1
+    let g:indexed_search_n_always_searches_forward = 0
 endif
 
 
 command! -bang ShowSearchIndex :call indexed_search#show_index(<bang>0)
-
-noremap <Plug>(indexed-search-/)  :ShowSearchIndex<CR>/
-noremap <Plug>(indexed-search-?)  :ShowSearchIndex<CR>?
-
-noremap <silent> <Plug>(indexed-search-*)  *:ShowSearchIndex<CR>
-noremap <silent> <Plug>(indexed-search-#)  #:ShowSearchIndex<CR>
-
-noremap <silent> <Plug>(indexed-search-n)  n:ShowSearchIndex<CR>
-noremap <silent> <Plug>(indexed-search-N)  N:ShowSearchIndex<CR>
-
-
-" These are internal mappings used by g:indexed_search_dont_move
-noremap        <Plug>(indexed-search-prev-pos) N
-noremap <expr> <Plug>(indexed-search-prev-view) <SID>prev_view()
-
-function! s:prev_view()
-     let sdiff = winline() - s:save_line
-     if sdiff > 0
-         return sdiff."\<C-e>"
-     elseif sdiff < 0
-         return -sdiff."\<C-y>"
-     endif
-     return ''
-endfunction
 
 
 function! s:should_unfold()
     return has('folding') && &fdo =~ 'search\|all'
 endfunction
 
-function! s:star_search(direction)
-    let seq = "\<Plug>(indexed-search-".a:direction.")"
-    if g:indexed_search_dont_move
-        let s:save_line = winline()
-        let seq .= "\<Plug>(indexed-search-prev-pos)"
-        let seq .= "\<Plug>(indexed-search-prev-view)"
-    elseif s:should_unfold()
-        let seq .= 'zv'
-    endif
-    return seq
+function! s:has_mapping(name)
+    return !empty(maparg(a:name, mode()))
 endfunction
 
-function! s:next_result(direction)
-    let direction = a:direction
-    if g:indexed_search_n_always_searches_forward && !v:searchforward
-        let direction = 'nN'[direction == 'n']
-    endif
+function! s:restview()
+    call winrestview(s:winview)
+endfunction
 
-    return "\<Plug>(indexed-search-".direction.")"
-                \ .(s:should_unfold() ? 'zv' : '')
+function! s:star(seq)
+    if g:indexed_search_dont_move
+        let s:winview = winsaveview()
+        return a:seq . "\<Plug>(indexed-search-restview)"
+    endif
+    return a:seq
+endfunction
+
+function! s:n(seq)
+    if g:indexed_search_n_always_searches_forward && !v:searchforward
+        return ["\<Plug>(indexed-search-n)", "\<Plug>(indexed-search-N)"][a:seq ==# 'n']
+    endif
+    return a:seq
+endfunction
+
+function! s:after()
+    return (s:should_unfold() ? 'zv' : '')
                 \ .(g:indexed_search_center ? 'zz' : '')
+                \ .(s:has_mapping('<Plug>(indexed-search-custom)') ? "\<Plug>(indexed-search-custom)" : '')
+                \ ."\<Plug>(indexed-search-index)"
 endfunction
 
 
 if g:indexed_search_mappings
-    nmap / <Plug>(indexed-search-/)
-    nmap ? <Plug>(indexed-search-?)
+    noremap  <Plug>(indexed-search-index)  <Nop>
+    nnoremap <Plug>(indexed-search-index)  :ShowSearchIndex<CR>
+    xnoremap <Plug>(indexed-search-index)  :<C-u>ShowSearchIndex<CR>gv
 
-    nmap <expr> * <SID>star_search('*')
-    nmap <expr> # <SID>star_search('#')
+    noremap  <Plug>(indexed-search-n)  n
+    noremap  <Plug>(indexed-search-N)  N
 
-    nmap <expr> n <SID>next_result('n')
-    nmap <expr> N <SID>next_result('N')
+    noremap  <Plug>(indexed-search-restview)  :call <SID>restview()<CR>
+    xnoremap <Plug>(indexed-search-restview)  :<C-u>call <SID>restview()<CR>gv
+
+    map  <expr> <Plug>(indexed-search-after)  <SID>after()
+    imap        <Plug>(indexed-search-after)  <Nop>
+
+    cmap <expr> <CR> "\<CR>" . (getcmdtype() =~ '[/?]' ? "\<Plug>(indexed-search-after)" : '')
+    " map  <expr> gd   'gd'    . "\<Plug>(indexed-search-after)"
+    " map  <expr> gD   'gD'    . "\<Plug>(indexed-search-after)"
+    map  <expr> *    <SID>star('*')  . "\<Plug>(indexed-search-after)"
+    map  <expr> #    <SID>star('#')  . "\<Plug>(indexed-search-after)"
+    map  <expr> g*   <SID>star('g*') . "\<Plug>(indexed-search-after)"
+    map  <expr> g#   <SID>star('g#') . "\<Plug>(indexed-search-after)"
+    map  <expr> n    <SID>n('n')     . "\<Plug>(indexed-search-after)"
+    map  <expr> N    <SID>n('N')     . "\<Plug>(indexed-search-after)"
 endif
 
 
 let &cpo = s:save_cpo
-
-" Last changes
-" 2006-10-20 added limitation by # of matches
-" 061021 lerner fixed problem with cmap <enter> that screwed maps
-" 061021 colors added
-" 061022 fixed g/ when too many matches
-" 061106 got message to work with check for largefile right
-" 061110 addition of DelayedEcho(ScheduledEcho) fixes and simplifies things
-" 061110 mapping for nN*# greately simplifified by switching to ScheduledEcho
-" 061110 fixed problem with i<c-o>/pat<cr> and c/PATTERN<CR> Markus Braun
-" 061110 fixed bug in / and ?, Counting moved to Delayd
-" 061110 fixed bug extra line+enter prompt in [/?] by addinf redraw
-" 061110 fixed overwriting builtin errmsg with ">1000 matches"
-" 061111 fixed bug with gg & 'set nosol' (gg->gg0)
-" 061113 fixed mysterious eschewing of @/ wfte *,#
-" 061113 fixed counting of match at the very beginning of file
-" 061113 added msgs "Before single match", "After single match"
-" 061113 fixed bug with &ut not always restored. This could happen if
-"        ScheduleEcho() was called twice in a row.
-" 061114 fixed problem with **#n. Direction of the last n is incorrect (must be backward
-"              but was incorrectly forward)
-" 061114 fixed disappearrance of "Hit BOTTOM" native msg when file<max and numhits>max
-" 061116 changed hlgroup os "At last match" from DiffChange to LineNr. Looks more natural.
-" 061120 shortened text messages.
-" 061120 made to work on vim6
-" 061120 bugfix for vim6 (virtcol() not col())
-" 061120 another bug with virtcol() vs col()
-" 061120 fixed [/?] on vim6 (vim6 doesn't have getcmdtype())
-" 061121 fixed mapping in <cr> with supertab.vim. Switched to [/?] mapping, removed <cr> mapping.
-"        also shortened code considerably, made vim6 and vim7 work same way, removed need
-"        for getcmdtype().
-" 061121 fixed handling of g:indexed_search_colors (Markus Braun)
-
 
 " Wishlist
 " -  using high-precision timer of vim7, count number of millisec
